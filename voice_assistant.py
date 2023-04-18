@@ -1,26 +1,23 @@
 #importing libraries
 import speech_recognition as sr
 import pyttsx3
-import datetime as dt
+import datetime
 import webbrowser
 import os
 import wikipedia
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
 import requests
-import json
+import openai
+import re
 
 #initialize text to speech engine
 engine = pyttsx3.init()
 
-#initialize Spotify API
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id="4db543dcdb4449c1b1c4596fa274fab9",
-                                               client_secret="d7e989b88a2c4f4ebd9c894545f0a381",
-                                               redirect_uri="http://localhost:8888/callback",
-                                               scope="user-library-read"))
-
 #initialize OpenWeatherMap API
-owm_api_key = "INSERT_YOUR_OWM_API_KEY_HERE"
+owm_api_key = "7adbd8fc202a95b42705fc9bb2f95470"
+
+# Authenticate with your API key and organization ID
+openai.api_key = "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"
+openai.organization = "org-gHdIY8iFlQ3XWGjF4Jsxalio"
 
 #speak function to output text as audio
 def speak(text):
@@ -29,7 +26,7 @@ def speak(text):
 
 #wishMe function to greet user based on the time of day
 def wishMe():
-    hour = dt.datetime.now().hour
+    hour = datetime.datetime.now().hour
     if hour >= 0 and hour < 12:
         speak("Good Morning!")
     elif hour >= 12 and hour < 18:
@@ -37,6 +34,45 @@ def wishMe():
     else:
         speak("Good Evening!")
     speak("You are so awesome. How may I help you?")
+
+def handle_sales_objections():
+    while True:
+        speak("Sure, what's the question?")
+        objection = takeCommand().lower()
+
+        # Define the prompt for the GPT-3 API
+        prompt = f"Overcome the following customer objection:\n\nQ: {objection}\nA: "
+
+        # Generate a response using the GPT-3 API
+        response = openai.Completion.create(
+            engine="davinci",
+            prompt=prompt,
+            max_tokens=250,
+            n=1,
+            stop=None,
+            temperature=0.3,
+        )
+
+        # Extract the response text from the API response
+        answer = response.choices[0].text.strip()
+
+        # Print and speak the answer without the prompt
+        print(answer)
+        speak(answer)
+
+        # Ask the user if they have any additional questions
+        speak("Do you have any additional questions?")
+        additional_question = takeCommand().lower()
+
+        # Exit the sales objection loop if the user says "exit" or "no"
+        if "stop" in additional_question or "no" in additional_question or "exit" in additional_question:
+            break
+
+#get the time
+def get_current_time():
+    now = datetime.datetime.now()
+    time_str = now.strftime("%I:%M %p")
+    return time_str
 
 #takeCommand function to capture audio input from user and convert to text
 def takeCommand():
@@ -54,70 +90,61 @@ def takeCommand():
             return "None"
         return query
 
-#play_music function to stream user's saved tracks from Spotify
-def play_music():
-    results = sp.current_user_saved_tracks()
-    track = results['items'][0]['track']
-    track_uri = track['uri']
-    sp.start_playback(uris=[track_uri])
-
-#get_weather function to check the weather and chance of rain in user's location from OpenWeatherMap API
+# get_weather function to check the weather and chance of rain in user's location from OpenWeatherMap API
 def get_weather():
-    #use requests module to get user's location using ipinfo.io API
-    ipinfo_response = requests.get("https://ipinfo.io/json?token=INSERT_YOUR_IPINFO_API_KEY_HERE")
-    location_data = json.loads(ipinfo_response.text)
-    city = location_data['city']
-    region = location_data['region']
+    zip_code = "33309"
+    country_code = "us"
+    url = f"http://api.openweathermap.org/data/2.5/weather?zip={zip_code},{country_code}&appid={owm_api_key}&units=metric"
+    response = requests.get(url)
+    data = response.json()
+    if data.get("main"):
+        weather = data["main"]
+        temperature_c = weather["temp"]
+        temperature_f = (temperature_c * 9/5) + 32 #convert to Fahrenheit
+        humidity = weather["humidity"]
+        pressure = weather["pressure"]
+        print(f"The temperature is {temperature_f:.1f}°F and humidity is {humidity}% with a pressure of {pressure}hPa")
+        speak(f"The temperature is {temperature_f:.1f}°F and humidity is {humidity}% with a pressure of {pressure}hPa")
+    else:
+        print("Couldn't fetch weather data for given location")
 
-    #use requests module to get weather data from OpenWeatherMap API
-    weather_response = requests.get(f"http://api.openweathermap.org/data/2.5/weather?q={city},{region}&appid={owm_api_key}&units=metric")
-    weather_data = json.loads(weather_response.text)
-    temp = weather_data['main']['temp']
-    feels_like = weather_data['main']['feels_like']
-    description = weather_data['weather'][0]['description']
-    humidity = weather_data['main']['humidity']
-    wind_speed = weather_data['wind']['speed']
-    rain_chance = weather_data.get('rain', {}).get('1h', 0)
-
-    #output weather information
-    speak(f"The temperature in {city} is {temp} degrees Celsius, and it feels like {feels_like} degrees Celsius. The sky is {description}. The humidity is {humidity} percent, and the wind speed is {wind_speed} meters per second. The chance of rain in the next hour is {rain_chance} millimeters.")
-    print(f"The temperature in {city} is {temp} degrees Celsius, and it feels like {feels_like} degrees Celsius. The sky is {description}. The humidity is {humidity} percent, and the wind speed is {wind_speed} meters per second. The chance of rain in the next hour is {rain_chance} millimeters.") 
-
-
-if name == 'main':
+if __name__ == '__main__':
     wishMe()
+
     while True:
         query = takeCommand().lower()
 
-    #searches for information on Wikipedia
-    if 'wikipedia' in query:
-        speak('Searching Wikipedia...')
-        query = query.replace("wikipedia", "")
-        results = wikipedia.summary(query, sentences=2)
-        speak("According to Wikipedia")
-        print(results)
-        speak(results)
+        # searches for information on Wikipedia
+        if 'wikipedia' in query:
+            speak('Searching Wikipedia...')
+            query = query.replace("wikipedia", "")
+            results = wikipedia.summary(query, sentences=2)
+            speak("According to Wikipedia")
+            print(results)
+            speak(results)
 
-    #opens YouTube
-    elif 'open youtube' in query:
-        url = 'https://www.youtube.com'
-        webbrowser.open(url)
+        # Handle Sales Objections
+        elif 'sales question' in query:
+            handle_sales_objections()
 
-    #opens Google
-    elif 'open google' in query:
-        url = 'https://www.google.com'
-        webbrowser.open(url)
+        # opens YouTube and search for a video
+        elif 'youtube' in query:
+            speak("What should I search for?")
+            search_term = takeCommand().lower()
+            speak("Here is what I found for " + search_term)
+            webbrowser.get().open("https://www.youtube.com/results?search_query=" + search_term)
 
-    #plays music from Spotify
-    elif 'play music from spotify' in query:
-        play_music()
+        # checks the weather
+        elif 'weather' in query:
+            speak("Checking the weather...")
+            get_weather()
 
-    #responds with current time
-    elif 'what time is it' in query:
-        strTime = dt.datetime.now().strftime("%H:%M:%S")
-        speak(f"The time is {strTime}")
+        # gets the current time
+        elif 'time' in query:
+            current_time = get_current_time()
+            speak(f"The time is {current_time}")
 
-    #exits program
-    elif 'exit' in query:
-        speak("Goodbye!")
-        break
+        # exits the program
+        elif 'exit' in query or 'stop' in query or 'no' in query:
+            speak("Goodbye!")
+            break
